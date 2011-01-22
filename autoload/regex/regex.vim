@@ -5,7 +5,7 @@
 "
 " License:
 "
-" Copyright (C) 2005 - 2010  Eric Van Dewoestine
+" Copyright (C) 2005 - 2011  Eric Van Dewoestine
 "
 " This program is free software: you can redistribute it and/or modify
 " it under the terms of the GNU General Public License as published by
@@ -23,20 +23,31 @@
 " }}}
 
 " Global Variables {{{
-  if !exists("g:EclimRegexHi{0}")
-    let g:EclimRegexHi{0} = 'Constant'
+  if !exists("g:RegexHi{0}")
+    let g:RegexHi{0} = 'Constant'
   endif
 
-  if !exists("g:EclimRegexHi{1}")
-    let g:EclimRegexHi{1} = 'MoreMsg'
+  if !exists("g:RegexHi{1}")
+    let g:RegexHi{1} = 'MoreMsg'
   endif
 
-  if !exists("g:EclimRegexGroupHi{0}")
-    let g:EclimRegexGroupHi{0} = 'Statement'
+  if !exists("g:RegexGroupHi{0}")
+    let g:RegexGroupHi{0} = 'Statement'
   endif
 
-  if !exists("g:EclimRegexGroupHi{1}")
-    let g:EclimRegexGroupHi{1} = 'Todo'
+  if !exists("g:RegexGroupHi{1}")
+    let g:RegexGroupHi{1} = 'Todo'
+  endif
+
+  if !exists("g:RegexTempDir")
+    let g:RegexTempDir = expand('$TMP')
+    if g:RegexTempDir == '$TMP'
+      let g:RegexTempDir = expand('$TEMP')
+    endif
+    if g:RegexTempDir == '$TEMP' && has('unix')
+      let g:RegexTempDir = '/tmp'
+    endif
+    let g:RegexTempDir = substitute(g:RegexTempDir, '\', '/', 'g')
   endif
 " }}}
 
@@ -50,28 +61,15 @@
       \ 'language specific regex against.',
     \ ]
 
-  let s:regexfile = g:EclimTempDir . '/eclim_<lang>_regex.txt'
+  let s:regexfile = g:RegexTempDir . '/regex_<lang>.txt'
 " }}}
-
-" SimpleVimToPcre(pattern) {{{
-" Perform some simple translations to make the supplied vim regex pattern a
-" more pcre pattern.
-function! eclim#regex#SimpleVimToPcre(pattern)
-  let pattern = a:pattern
-  let pattern = substitute(pattern, '\\[<>]', '\\b', 'g')
-  let pattern = substitute(pattern, '\\{-}', '*?', 'g')
-  " vim sometimes adds a leading 'very nomagic' when using normal *
-  let pattern = substitute(pattern, '^\\V', '', '')
-  return pattern
-endfunction " }}}
 
 " OpenTestWindow(lang) {{{
 " Opens a buffer where the user can test regex expressions.
-function! eclim#regex#OpenTestWindow(lang)
-  let file = substitute(s:regexfile, '<lang>', a:lang, '')
+function! regex#regex#OpenTestWindow(lang)
+  let lang = a:lang != '' ? a:lang : &ft
+  let file = substitute(s:regexfile, '<lang>', lang, '')
   if bufwinnr(file) == -1
-    let filename = expand('%:p')
-
     exec "botright 10split " . file
     setlocal ft=regex
     setlocal winfixheight
@@ -79,28 +77,30 @@ function! eclim#regex#OpenTestWindow(lang)
     setlocal nobuflisted
     setlocal nobackup
     setlocal nowritebackup
+    setlocal statusline=%<%f\ %h%=%-10.(%l,%c%V\ flags=%{b:regex_flags}%)\ %P
 
+    let b:regex_flags = 'm' " default multiline on
+    let b:regex_lang = a:lang
+
+    nnoremap <buffer> <silent> <c-f> :call <SID>Flags()<cr>
     command -buffer NextMatch :call s:NextMatch()
     command -buffer PrevMatch :call s:PrevMatch()
 
-    augroup eclim_regex
+    augroup regex
       autocmd!
-      exec "autocmd BufWritePost <buffer> call s:Evaluate('" . a:lang . "')"
-      call eclim#util#GoToBufferWindowRegister(filename)
+      autocmd BufWritePost <buffer> call s:Evaluate()
+      autocmd BufWinLeave <buffer> call s:FlagsClose()
     augroup END
-
-    if !exists('b:eclim_regex_type')
-      let b:eclim_regex_type = 'file'
-    endif
   endif
 
   nohlsearch
-  write
+  noautocmd write
+  call s:Evaluate()
 endfunction " }}}
 
-" s:Evaluate(lang) {{{
+" s:Evaluate() {{{
 " Evaluates the test regex file.
-function! s:Evaluate(lang)
+function! s:Evaluate()
   if line('$') == 1 && getline('$') == ''
     call s:AddTestContent()
   endif
@@ -108,24 +108,36 @@ function! s:Evaluate(lang)
   " forces reset of syntax
   set ft=regex
 
-  let file = substitute(s:regexfile, '<lang>', a:lang, '')
+  let lang = b:regex_lang
+  let file = substitute(s:regexfile, '<lang>', lang, '')
   let b:results = []
-  exec 'let out = eclim#' . a:lang . '#regex#Evaluate("' . file . '")'
+  try
+    exec 'let out = regex#lang#' . lang . '#Evaluate("' . file . '", b:regex_flags)'
+  catch /E117/
+    echohl Error | echom 'Regex does not yet support ' . lang | echohl Normal
+    call delete(file)
+    set nomodified
+    bdelete
+    return
+  endtry
+
   let results = split(out, '\n')
   if len(results) == 1 && results[0] == '0'
     return
   endif
   let b:results = results
 
+  let offsets = s:CompileOffsets(file)
+
   let matchIndex = 0
   for result in results
-    let groups = split(result, '|')
+    let groups = split(result, ',')
     let groupIndex = 0
     if len(groups) > 1
       for group in groups[1:]
-        let patterns = s:BuildPatterns(group)
+        let patterns = s:BuildPatterns(group, offsets)
         for pattern in patterns
-          exec 'syntax match ' . g:EclimRegexGroupHi{groupIndex % 2} .
+          exec 'syntax match ' . g:RegexGroupHi{groupIndex % 2} .
             \ ' /' . pattern . '/ '
         endfor
         let groupIndex += 1
@@ -133,101 +145,26 @@ function! s:Evaluate(lang)
     endif
 
     let match = groups[0]
-    let patterns = s:BuildPatterns(match)
+    let patterns = s:BuildPatterns(match, offsets)
 
     for pattern in patterns
-      exec 'syntax match ' . g:EclimRegexHi{matchIndex % 2} .
+      exec 'syntax match ' . g:RegexHi{matchIndex % 2} .
         \ ' /' . pattern . '/ ' .
-        \ 'contains=' . g:EclimRegexGroupHi0 . ',' . g:EclimRegexGroupHi1
+        \ 'contains=' . g:RegexGroupHi0 . ',' . g:RegexGroupHi1
     endfor
 
     let matchIndex += 1
   endfor
 endfunction "}}}
 
-" s:NextMatch() {{{
-" Moves the cursor to the next match.
-function! s:NextMatch()
-  if exists("b:results")
-    let curline = line('.')
-    let curcolumn = col('.')
-    for result in b:results
-      let line = substitute(result, '\([0-9]\+\):.*', '\1', '')
-      let column = substitute(result, '[0-9]\+:\([0-9]\+\).*', '\1', '')
-      if column > len(getline(line))
-        let column -= 1
-      endif
-      if (line > curline) || (line == curline && column > curcolumn)
-        call cursor(line, column)
-        return
-      endif
-    endfor
-    if len(b:results) > 0
-      let result = b:results[0]
-      call eclim#util#EchoWarning("Search hit BOTTOM, continuing at TOP")
-      let line = substitute(result, '\([0-9]\+\):.*', '\1', '')
-      let column = substitute(result, '[0-9]\+:\([0-9]\+\).*', '\1', '')
-      call cursor(line, column)
-    endif
-  endif
-endfunction " }}}
-
-" s:PrevMatch() {{{
-" Moves the cursor to the previous match.
-function! s:PrevMatch()
-  if exists("b:results")
-    let curline = line('.')
-    let curcolumn = col('.')
-    let index = len(b:results) - 1
-    while index >= 0
-      let result = b:results[index]
-      let line = substitute(result, '\([0-9]\+\):.*', '\1', '')
-      let column = substitute(result, '[0-9]\+:\([0-9]\+\).*', '\1', '')
-      if column > len(getline(line))
-        let column -= 1
-      endif
-      if (line < curline) || (line == curline && column < curcolumn)
-        call cursor(line, column)
-        return
-      endif
-      let index -= 1
-    endwhile
-    if len(b:results) > 0
-      let result = b:results[len(b:results) - 1]
-      call eclim#util#EchoWarning("Search hit TOP, continuing at BOTTOM")
-      let line = substitute(result, '\([0-9]\+\):.*', '\1', '')
-      let column = substitute(result, '[0-9]\+:\([0-9]\+\).*', '\1', '')
-      call cursor(line, column)
-    endif
-  endif
-endfunction " }}}
-
-" s:AddTestContent() {{{
-" Add the test content to the current regex test file.
-function! s:AddTestContent()
-  call append(1, s:test_content)
-  1,1delete _
-
-  "augroup eclim_regex
-  "  autocmd!
-  "augroup END
-
-  "write
-
-  "augroup eclim_regex
-  "  autocmd BufWritePost <buffer> call s:Evaluate()
-  "augroup END
-endfunction " }}}
-
-" s:BuildPatterns(match) {{{
+" s:BuildPatterns(match, offsets) {{{
 " Builds the regex patterns for the supplied match.
-function! s:BuildPatterns(match)
+function! s:BuildPatterns(match, offsets)
   " vim (as of 7 beta 2) doesn't seem to be handling multiline matches very
   " well (highlighting can get lost while scrolling), so here we break them up.
-  let startLine = substitute(a:match, '\([0-9]\+\):.*', '\1', '') + 0
-  let startColumn = substitute(a:match, '[0-9]\+:\([0-9]\+\).*', '\1', '') + 0
-  let endLine = substitute(a:match, '.*-\([0-9]\+\):.*', '\1', '') + 0
-  let endColumn = substitute(a:match, '.*-[0-9]\+:\([0-9]\+\)', '\1', '') + 0
+  exec 'let [start,end] = ' . string(split(a:match, '-'))
+  let [startLine, startColumn] = a:offsets.offsetToLineColumn(start)
+  let [endLine, endColumn] = a:offsets.offsetToLineColumn(end)
 
   let patterns = []
 
@@ -264,5 +201,251 @@ function! s:BuildPatterns(match)
 
   return patterns
 endfunction" }}}
+
+" s:CompileOffsets(file) {{{
+" Compile a set of offsets to line numbers for quick conversion of offsets to
+" line/column.
+function! s:CompileOffsets(file)
+  let offsets = {'offsets': []}
+
+  function! offsets.compile(file) dict " {{{
+    let offset = 0
+    call add(self.offsets, offset)
+    for line in readfile(a:file, 'b')
+      let offset += len(line) + 1
+      call add(self.offsets, offset)
+    endfor
+  endfunction " }}}
+
+  function! offsets.offsetToLineColumn(offset) dict " {{{
+    if a:offset <= 0
+      return [1, 1]
+    endif
+
+    let bot = -1
+    let top = len(self.offsets) - 1
+    while (top - bot) > 1
+      let mid = (top + bot) / 2
+      if self.offsets[mid] < a:offset
+        let bot = mid
+      else
+        let top = mid
+      endif
+    endwhile
+
+    if self.offsets[top] > a:offset
+      let top -= 1
+    endif
+
+    let line = top + 1
+    let column = 1 + a:offset - self.offsets[top]
+    return [line, column]
+  endfunction " }}}
+
+  call offsets.compile(a:file)
+
+  return offsets
+endfunction " }}}
+
+" s:Flags() {{{
+" Opens a window where the user can enable/disable regex compile flags.
+function! s:Flags()
+  if s:FlagsClose()
+    return
+  endif
+
+  let regex_flags = b:regex_flags
+  let regex_buffer = bufnr('%')
+
+  vertical rightb 50new RegexFlags
+
+  let b:regex_buffer = regex_buffer
+
+  let m = regex_flags =~ 'm' ? 'x' : ' '
+  let i = regex_flags =~ 'i' ? 'x' : ' '
+  let d = regex_flags =~ 'd' ? 'x' : ' '
+
+  call append(1, [
+      \ 'Toggle regex compile flags using <cr> or <space>.',
+      \ '',
+      \ m . ' (m) multiline',
+      \ i . ' (i) ignore case',
+      \ d . ' (d) dotall',
+    \ ])
+  1,1delete _
+
+  setlocal nonumber
+  setlocal buftype=nofile
+  setlocal winfixwidth
+
+  nnoremap <buffer> <silent> <c-f> :call <SID>Flags()<cr>
+  nnoremap <buffer> <silent> <space> :call <SID>ToggleFlag()<cr>
+  nnoremap <buffer> <silent> <cr> :call <SID>ToggleFlag()<cr>
+  nnoremap <buffer> <silent> u <Nop>
+  nnoremap <buffer> <silent> U <Nop>
+  nnoremap <buffer> <silent> <c-r> <Nop>
+endfunction " }}}
+
+" s:FlagsClose() {{{
+function! s:FlagsClose()
+  let winnr = bufwinnr('RegexFlags')
+  if winnr != -1
+    let curwin = winnr()
+    exec winnr . 'winc w'
+    bdelete
+    exec curwin . 'winc w'
+    return 1
+  endif
+  return 0
+endfunction " }}}
+
+" s:ToggleFlag() {{{
+function! s:ToggleFlag()
+  let line = getline('.')
+  if line =~ '^[x ] ([mid])'
+    let value = line =~ '^x' ? ' ' : 'x'
+    call setline('.', value . line[1:])
+  endif
+  let lines = filter(getline(1, '$'), 'v:val =~ "^x ([mid])"')
+  let flags = join(map(lines, 'substitute(v:val, "x (\\(\\w\\)).*", "\\1", "")'), '')
+  call setbufvar(b:regex_buffer, 'regex_flags', flags)
+
+  let winnr = bufwinnr(b:regex_buffer)
+  if winnr != -1
+    let curwinnr = winnr()
+    exec winnr . 'winc w'
+    call s:Evaluate()
+    exec curwinnr . 'winc w'
+  endif
+endfunction " }}}
+
+" s:NextMatch() {{{
+" Moves the cursor to the next match.
+function! s:NextMatch()
+  if exists("b:results")
+    let curline = line('.')
+    let curcolumn = col('.')
+    for result in b:results
+      let line = substitute(result, '\([0-9]\+\):.*', '\1', '')
+      let column = substitute(result, '[0-9]\+:\([0-9]\+\).*', '\1', '')
+      if column > len(getline(line))
+        let column -= 1
+      endif
+      if (line > curline) || (line == curline && column > curcolumn)
+        call cursor(line, column)
+        return
+      endif
+    endfor
+    if len(b:results) > 0
+      let result = b:results[0]
+      echohl WarningMsg | echo "Search hit BOTTOM, continuing at TOP" | echohl Normal
+      let line = substitute(result, '\([0-9]\+\):.*', '\1', '')
+      let column = substitute(result, '[0-9]\+:\([0-9]\+\).*', '\1', '')
+      call cursor(line, column)
+    endif
+  endif
+endfunction " }}}
+
+" s:PrevMatch() {{{
+" Moves the cursor to the previous match.
+function! s:PrevMatch()
+  if exists("b:results")
+    let curline = line('.')
+    let curcolumn = col('.')
+    let index = len(b:results) - 1
+    while index >= 0
+      let result = b:results[index]
+      let line = substitute(result, '\([0-9]\+\):.*', '\1', '')
+      let column = substitute(result, '[0-9]\+:\([0-9]\+\).*', '\1', '')
+      if column > len(getline(line))
+        let column -= 1
+      endif
+      if (line < curline) || (line == curline && column < curcolumn)
+        call cursor(line, column)
+        return
+      endif
+      let index -= 1
+    endwhile
+    if len(b:results) > 0
+      let result = b:results[len(b:results) - 1]
+      echohl WarningMsg | echo "Search hit TOP, continuing at BOTTOM" | echohl Normal
+      let line = substitute(result, '\([0-9]\+\):.*', '\1', '')
+      let column = substitute(result, '[0-9]\+:\([0-9]\+\).*', '\1', '')
+      call cursor(line, column)
+    endif
+  endif
+endfunction " }}}
+
+" s:AddTestContent() {{{
+" Add the test content to the current regex test file.
+function! s:AddTestContent()
+  call append(1, s:test_content)
+  1,1delete _
+endfunction " }}}
+
+" System(cmd) {{{
+" Executes system() accounting for possibly disruptive vim options.
+function! regex#regex#System(cmd)
+  let saveshell = &shell
+  let saveshellcmdflag = &shellcmdflag
+  let saveshellpipe = &shellpipe
+  let saveshellquote = &shellquote
+  let saveshellredir = &shellredir
+  let saveshellslash = &shellslash
+  let saveshelltemp = &shelltemp
+  let saveshellxquote = &shellxquote
+
+  if has('win32') || has('win64')
+    set shell=cmd.exe shellcmdflag=/c
+    set shellpipe=>%s\ 2>&1 shellredir=>%s\ 2>&1
+    set shellquote= shellxquote=
+    set shelltemp noshellslash
+  else
+    if executable('/bin/bash')
+      set shell=/bin/bash
+    else
+      set shell=/bin/sh
+    endif
+    set shellcmdflag=-c
+    set shellpipe=2>&1\|\ tee shellredir=>%s\ 2>&1
+    set shellquote= shellxquote=
+    set shelltemp noshellslash
+  endif
+
+  let result = system(a:cmd)
+
+  let &shell = saveshell
+  let &shellcmdflag = saveshellcmdflag
+  let &shellquote = saveshellquote
+  let &shellslash = saveshellslash
+  let &shelltemp = saveshelltemp
+  let &shellxquote = saveshellxquote
+  let &shellpipe = saveshellpipe
+  let &shellredir = saveshellredir
+
+  if v:shell_error
+    echohl Error
+    echom 'Failed to execute command (' . a:cmd . '): ' . result
+    echohl Normal
+    return
+  endif
+
+  return result
+endfunction " }}}
+
+" Cygpath(path, type) {{{
+function! regex#regex#Cygpath(path, type)
+  if executable('cygpath')
+    let path = substitute(a:path, '\', '/', 'g')
+    if a:type == 'windows'
+      let path = regex#System('cygpath -m "' . path . '"')
+    else
+      let path = regex#System('cygpath "' . path . '"')
+    endif
+    let path = substitute(path, '\n$', '', '')
+    return path
+  endif
+  return a:path
+endfunction " }}}
 
 " vim:ft=vim:fdm=marker

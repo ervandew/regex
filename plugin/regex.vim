@@ -35,40 +35,10 @@
 "   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 " }}}
 
-" Script Variables {{{
-  let s:path = substitute(expand("<sfile>:h"), '\', '/', 'g')
+" Commands {{{
+
+command! -nargs=? Regex call regex#regex#OpenTestWindow(<q-args>)
+
 " }}}
-
-" Evaluate(file, flags) {{{
-function regex#lang#java#Evaluate(file, flags)
-  if !exists('s:classpath')
-    let path = s:path
-    if has('win32unix')
-      let path = regex#regex#Cygpath(s:path, 'windows')
-    endif
-    let s:classpath = path
-  endif
-
-  if !exists('s:built')
-    let build = 0
-    let src = s:path . '/Regex.java'
-    if has('win32unix')
-      let src = regex#regex#Cygpath(src, 'windows')
-    endif
-    let class = fnamemodify(src, ':r') . '.class'
-    if !filereadable(class) || getftime(src) > getftime(class)
-      echo 'Compiling Java Source...'
-      let output = regex#regex#System('javac "' . src . '"')
-      if output == '0'
-        return
-      endif
-    else
-      let s:built = 1
-    endif
-  endif
-
-  let command = 'java -client -cp "' . s:classpath . '" Regex "' . a:file . '" ' . a:flags
-  return regex#regex#System(command)
-endfunction " }}}
 
 " vim:ft=vim:fdm=marker

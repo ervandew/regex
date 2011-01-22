@@ -1,193 +1,144 @@
 /**
- * Copyright (C) 2005 - 2009  Eric Van Dewoestine
+ * Copyright (c) 2005 - 2011, Eric Van Dewoestine
+ * All rights reserved.
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Redistribution and use of this software in source and binary forms, with
+ * or without modification, are permitted provided that the following
+ * conditions are met:
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * * Redistributions of source code must retain the above
+ *   copyright notice, this list of conditions and the
+ *   following disclaimer.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * * Redistributions in binary form must reproduce the above
+ *   copyright notice, this list of conditions and the
+ *   following disclaimer in the documentation and/or other
+ *   materials provided with the distribution.
+ *
+ * * Neither the name of Eric Van Dewoestine nor the names of its
+ *   contributors may be used to endorse or promote products derived from
+ *   this software without specific prior written permission of
+ *   Eric Van Dewoestine.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+ * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-package org.eclim.plugin.jdt.command.regex;
-
 import java.io.BufferedReader;
 import java.io.FileInputStream;
 import java.io.InputStreamReader;
-
-import java.util.ArrayList;
-import java.util.List;
+import java.io.StringWriter;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import org.eclim.annotation.Command;
-
-import org.eclim.command.CommandLine;
-import org.eclim.command.Options;
-
-import org.eclim.plugin.core.command.AbstractCommand;
-
-import org.eclim.util.IOUtils;
-
-import org.eclim.util.file.FileOffsets;
-import org.eclim.util.file.FileUtils;
 
 /**
  * Command to evaluate the specified regex test file.
  *
  * @author Eric Van Dewoestine
  */
-@Command(
-  name = "java_regex",
-  options =
-    "REQUIRED f file ARG," +
-    "OPTIONAL t type ARG"
-)
-public class RegexCommand
-  extends AbstractCommand
+public class Regex
 {
-  private static final String FILE = "file";
-  private static final String LINE = "line";
-
-  /**
-   * {@inheritDoc}
-   */
-  public String execute(CommandLine commandLine)
+  public static void main(String[] args)
     throws Exception
   {
-    String file = commandLine.getValue(Options.FILE_OPTION);
-    String type = commandLine.getValue(Options.TYPE_OPTION);
-    return RegexFilter.instance.filter(commandLine, evaluate(file, type));
+    String file = args[0];
+    String flags = args.length > 1 ? args[1] : "";
+    evaluate(file, flags);
   }
 
   /**
    * Evaluates the supplied test regex file.
    *
    * @param file The file name.
-   * @param type The regex evaluation type to use.
-   * @return The results.
+   * @param flags The regex flags to be applied to the pattern.
    */
-  private List<MatcherResult> evaluate(String file, String type)
+  private static void evaluate(String file, String flags)
     throws Exception
   {
-    ArrayList<MatcherResult> results = new ArrayList<MatcherResult>();
-
     String regex = null;
     FileInputStream fis = null;
     try{
       fis = new FileInputStream(file);
       BufferedReader reader = new BufferedReader(new InputStreamReader(fis));
+      reader.mark(1024); // should hopefully be plenty
 
       // read the pattern from the first line of the file.
       regex = reader.readLine();
       if (regex == null){
-        return null;
+        return;
+      }
+      reader.reset();
+
+      StringWriter out = new StringWriter();
+      int n = 0;
+      char[] buffer = new char[1024];
+      while ((n = reader.read(buffer)) != -1) {
+        out.write(buffer, 0, n);
       }
 
-      Pattern pattern = Pattern.compile(regex.trim());
+      String contents = out.toString();
 
-      if (type == null || FILE.equals(type)){
-        FileOffsets offsets = FileOffsets.compile(file);
-        Matcher matcher = FileUtils.matcher(pattern, file);
+      int pflags = 0;
+      if (flags.indexOf('m') != -1){
+        pflags |= Pattern.MULTILINE;
+      }
+      if (flags.indexOf('i') != -1){
+        pflags |= Pattern.CASE_INSENSITIVE;
+      }
+      if (flags.indexOf('d') != -1){
+        pflags |= Pattern.DOTALL;
+      }
 
-        // force matching to start past the first line.
-        if(matcher.find(regex.length() + 1)){
-          processFinding(offsets, matcher, results);
-        }
-        while(matcher.find()){
-          processFinding(offsets, matcher, results);
-        }
-      }else{
-        String line = null;
-        for(int ii = 2; (line = reader.readLine()) != null; ii++){
-          Matcher matcher = pattern.matcher(line);
+      Pattern pattern = Pattern.compile(regex.trim(), pflags);
+      Matcher matcher = pattern.matcher(contents);
 
-          if(matcher.find()){
-            processFinding(ii, matcher, results);
-          }
-          while(matcher.find()){
-            processFinding(ii, matcher, results);
-          }
-        }
+      // force matching to start past the first line.
+      if(matcher.find(regex.length() + 1)){
+        processFinding(matcher);
+      }
+      while(matcher.find()){
+        processFinding(matcher);
       }
     }finally{
-      IOUtils.closeQuietly(fis);
+      try{
+        fis.close();
+      }catch(Exception e){
+      }
     }
-
-    return results;
   }
 
   /**
    * Process the current regex finding.
    *
-   * @param offsets The FileOffsets.
    * @param matcher The Matcher.
-   * @param results The list of results to add to.
    */
-  private void processFinding(
-      FileOffsets offsets, Matcher matcher, List<MatcherResult> results)
+  private static void processFinding(Matcher matcher)
   {
-    MatcherResult result = new MatcherResult();
+    StringBuffer result = new StringBuffer();
 
-    int[] lineColumn = offsets.offsetToLineColumn(matcher.start());
-    result.setStartLine(lineColumn[0]);
-    result.setStartColumn(lineColumn[1]);
-
-    lineColumn = offsets.offsetToLineColumn(matcher.end() - 1);
-    result.setEndLine(lineColumn[0]);
-    result.setEndColumn(lineColumn[1]);
+    result
+      .append(matcher.start())
+      .append('-')
+      .append(matcher.end() - 1);
 
     for (int ii = 1; ii <= matcher.groupCount(); ii++){
-      MatcherResult group = new MatcherResult();
-
-      lineColumn = offsets.offsetToLineColumn(matcher.start(ii));
-      group.setStartLine(lineColumn[0]);
-      group.setStartColumn(lineColumn[1]);
-
-      lineColumn = offsets.offsetToLineColumn(matcher.end(ii) - 1);
-      group.setEndLine(lineColumn[0]);
-      group.setEndColumn(lineColumn[1]);
-
-      result.addGroupMatch(group);
+      if (matcher.start(ii) >= 0){
+        result
+          .append(',')
+          .append(matcher.start(ii))
+          .append('-')
+          .append(matcher.end(ii) - 1);
+      }
     }
-    results.add(result);
-  }
-
-  /**
-   * Process the current regex finding.
-   *
-   * @param line The current line number being processed.
-   * @param matcher The Matcher.
-   * @param results The list of results to add to.
-   */
-  private void processFinding(
-      int line, Matcher matcher, List<MatcherResult> results)
-  {
-    MatcherResult result = new MatcherResult();
-
-    result.setStartLine(line);
-    result.setStartColumn(matcher.start() + 1);
-
-    result.setEndLine(line);
-    result.setEndColumn(matcher.end());
-
-    for (int ii = 1; ii <= matcher.groupCount(); ii++){
-      MatcherResult group = new MatcherResult();
-
-      group.setStartLine(line);
-      group.setStartColumn(matcher.start(ii) + 1);
-
-      group.setEndLine(line);
-      group.setEndColumn(matcher.end(ii));
-
-      result.addGroupMatch(group);
-    }
-    results.add(result);
+    System.out.println(result);
   }
 }
