@@ -1,0 +1,53 @@
+*regex.txt*
+
+-----------------------------------------------------------------------------
+Regex
+
+  Prerequisites                      |regex-prerequisites|
+  Usage                              |regex-usage|
+  Configuration                      |regex-configuration|
+
+-----------------------------------------------------------------------------
+Prerequisites                                    *regex-prerequisites*
+
+Testing of regexes requires that the interpreter/environment of the language
+to test with be present in your executable path (java, python, ruby, etc).
+
+-----------------------------------------------------------------------------
+Usage                                            *regex-usage* *:Regex*
+
+To test regular expressions you can invoke the :Regex command which will open
+a temporary window where the first line is the regex to be tested and all the
+remaining lines are the content to test the regex against. When you issue a
+|:write| in the temporary window, the regex will be executed and matching
+results will be highlighted accordingly.
+
+Note: By default the :Regex command will pick the interpreter to use based on
+the current file's filetype. You can override the default by supplying the
+filetype you want as an argument (ex. :Regex python).
+
+                                                 *regex-flags*
+
+The execution of the regex is dependent on what regex flags have been set.  On
+the right hand side of the window's status line, you can see what flags are
+currently set (ex. flags=m). To change the flags you can hit Ctrl-f and
+another temporary window will open where you can toggle the available flags
+using either <cr> or <space>.
+
+-----------------------------------------------------------------------------
+Configuration                                    *regex-configuration*
+
+- *g:RegexHi{0}* (Default: 'Constant') - The syntax highlight group used to
+  highlight regex matches.
+- *g:RegexHi{1}* (Default: 'MoreMsg') - Another syntax highlight group for
+  matched regex matches which is alternated with the other group to help
+  differentiate between adjacent matches.
+- *g:RegexGroupHi{0}* (Default: 'Statement') - The syntax highlight group used
+  for alternating highlighting of matched regex groups.
+- *g:RegexGroupHi{1}* (Default: 'Todo') - The other syntax highlight group for
+  matched regex groups.
+- *g:RegexTempDir* (Default: $TMP, $TEMP, or '/tmp') - The temporary directory
+  used for the regex content.
+
+
+vim:tw=78:ft=help:norl:
