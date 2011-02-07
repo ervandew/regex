@@ -93,7 +93,7 @@ function! regex#regex#OpenTestWindow(lang)
     setlocal statusline=%<%f\ %h%=%-10.(%l,%c%V\ flags=%{b:regex_flags}%)\ %P
 
     let b:regex_flags = 'm' " default multiline on
-    let b:regex_lang = a:lang
+    let b:regex_lang = lang
 
     nnoremap <buffer> <silent> <c-f> :call <SID>Flags()<cr>
     command -buffer NextMatch :call s:NextMatch()
