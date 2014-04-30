@@ -1,7 +1,7 @@
 " Author:  Eric Van Dewoestine
 "
 " License: {{{
-"   Copyright (c) 2005 - 2011, Eric Van Dewoestine
+"   Copyright (c) 2005 - 2014, Eric Van Dewoestine
 "   All rights reserved.
 "
 "   Redistribution and use of this software in source and binary forms, with
@@ -83,10 +83,10 @@ function! regex#regex#OpenTestWindow(lang)
   let lang = a:lang != '' ? a:lang : &ft
   let file = substitute(s:regexfile, '<lang>', lang, '')
   if bufwinnr(file) == -1
-    exec "botright 10split " . file
+    exec "keepalt botright 10split " . file
     setlocal ft=regex
     setlocal winfixheight
-    setlocal bufhidden=delete
+    setlocal bufhidden=wipe
     setlocal nobuflisted
     setlocal nobackup
     setlocal nowritebackup
@@ -213,7 +213,7 @@ function! s:BuildPatterns(match, offsets)
   endif
 
   return patterns
-endfunction" }}}
+endfunction " }}}
 
 " s:CompileOffsets(file) {{{
 " Compile a set of offsets to line numbers for quick conversion of offsets to
