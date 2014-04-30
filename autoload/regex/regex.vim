@@ -90,7 +90,7 @@ function! regex#regex#OpenTestWindow(lang)
     setlocal nobuflisted
     setlocal nobackup
     setlocal nowritebackup
-    setlocal statusline=%<%f\ %h%=%-10.(%l,%c%V\ flags=%{b:regex_flags}%)\ %P
+    setlocal statusline=%<%f\ %M\ %h%=%-10.(%l,%c%V\ flags=%{b:regex_flags}%)\ %P
 
     let b:regex_flags = 'm' " default multiline on
     let b:regex_lang = lang
@@ -116,6 +116,7 @@ endfunction " }}}
 function! s:Evaluate()
   if line('$') == 1 && getline('$') == ''
     call s:AddTestContent()
+    setlocal nomodified
   endif
 
   " forces reset of syntax
