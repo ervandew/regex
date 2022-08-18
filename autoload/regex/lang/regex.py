@@ -46,7 +46,7 @@ def main():
   flags = len(sys.argv) > 2 and sys.argv[2] or ''
 
   try:
-    content = f.read()
+    content = f.read().strip()
     regex_text = content.split('\n', 1)
     if len(regex_text) != 2:
       return
@@ -60,6 +60,7 @@ def main():
       pflags |= re.IGNORECASE
     if 'd' in flags:
       pflags |= re.DOTALL
+
     pattern = re.compile(regex, pflags)
 
     pos = len(content) - len(text)
