@@ -11,7 +11,7 @@ Regex
 Prerequisites                                    *regex-prerequisites*
 
 Testing of regexes requires that the interpreter/environment of the language
-to test with be present in your executable path (java, python, ruby, etc).
+to test with be present in your executable path (java, lua, python, ruby, etc).
 
 -----------------------------------------------------------------------------
 Usage                                            *regex-usage* *:Regex*

@@ -1,4 +1,4 @@
-.. Copyright (c) 2005 - 2011, Eric Van Dewoestine
+.. Copyright (c) 2005 - 2024, Eric Van Dewoestine
    All rights reserved.
 
    Redistribution and use of this software in source and binary forms, with
@@ -32,6 +32,6 @@
    SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Regex is a vim plugin which allows you to test regular expressions for several
-languages (currently java, python, and ruby).
+languages (currently java, lua, python, and ruby).
 
 Please see the vim help file for full documentation.
